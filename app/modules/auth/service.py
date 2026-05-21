@@ -151,12 +151,20 @@ def register_with_dni(data: DNIRegisterRequest):
                 status_code=400,
                 detail="El nombre no coincide con RENIEC"
          )
+        
+        if not data.user_type.strip():
+            raise HTTPException(
+            status_code=400,
+            detail="El tipo de usuario es obligatorio"
+            )
 
         # Hasheamos la contrasena
 
         hashed_password = hash_password(
             data.password
         )
+
+        
 
         # Creamos un objeto de tipo Usuario
 
@@ -165,7 +173,8 @@ def register_with_dni(data: DNIRegisterRequest):
             email=data.email,
             password=hashed_password,
             document_type="dni",
-            document_number=data.dni
+            document_number=data.dni,
+            user_type=data.user_type
         )
 
         # Guardamos en la bd al usuario (el id se genera automaticamente)
@@ -179,7 +188,8 @@ def register_with_dni(data: DNIRegisterRequest):
 
         token = create_token({
             "user_id": user.id,   # Tiene el valor del id del usuario guardado gracias a refresh
-            "email": user.email   # Tiene el valor del email del usuario guardado gracias a refresh
+            "email": user.email,   # Tiene el valor del email del usuario guardado gracias a refresh
+            "user_type:" : user.user_type
         })
 
         return {
@@ -229,6 +239,12 @@ def register_with_immigrationcard(
             raise HTTPException(
                 status_code=400,
                 detail="El carnet ya existe"
+            )
+        
+        if not data.user_type.strip():
+            raise HTTPException(
+            status_code=400,
+            detail="El tipo de usuario es obligatorio"
             )
 
         # Hashea la contrasena

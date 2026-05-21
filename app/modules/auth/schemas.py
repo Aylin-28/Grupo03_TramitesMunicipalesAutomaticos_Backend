@@ -14,6 +14,7 @@ class BaseRegisterRequest(BaseModel):
     fullname: str
     email: EmailStr
     password : str
+    user_type : str
 
 class DNIRegisterRequest(BaseRegisterRequest):
     dni: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$")

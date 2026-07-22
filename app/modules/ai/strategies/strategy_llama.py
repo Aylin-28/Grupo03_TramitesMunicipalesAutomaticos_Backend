@@ -36,6 +36,23 @@ async def ask_strategy_llama(data: AskRequest, db: Session, user_id: int) -> Ask
                 f"[FIN DEL DOCUMENTO ADJUNTO]"
             )
 
+            # Guardar el documento en la base de datos (ChatContext)
+            import uuid
+            from app.models.chat_context import ChatContext
+            
+            doc_uuid = str(uuid.uuid4())
+            chat_context_record = ChatContext(
+                id=doc_uuid,
+                chat_id=data.chat_id,
+                filename=data.file.filename,
+                extracted_text=texto_completo_del_archivo
+            )
+            db.add(chat_context_record)
+            
+            # Cambiar el estado del chat a 'action' (Acción Requerida) para que pase a la bandeja admin
+            chat_existente.state = "action"
+
+
         mensajes_db = db.query(Message).filter(Message.chat_id == data.chat_id).order_by(Message.created_at.desc()).limit(3).all()
 
         mensajes_db.reverse()

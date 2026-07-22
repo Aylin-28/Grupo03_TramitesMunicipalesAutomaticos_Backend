@@ -18,5 +18,7 @@ class User(Base):
 
     document_number = Column(String, unique=True, nullable=False)
 
+    role = Column(String, nullable=False, default="user")
+
     chats = relationship("Chat", back_populates="user")
 

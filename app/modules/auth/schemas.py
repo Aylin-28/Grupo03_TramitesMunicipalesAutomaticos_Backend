@@ -18,13 +18,21 @@ class BaseRegisterRequest(BaseModel):
 class DNIRegisterRequest(BaseRegisterRequest):
     dni: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$")
 
+from pydantic import Field, field_validator
+
 class ImmigrationCardRegisterRequest(BaseRegisterRequest):
     immigration_card: str = Field(
         ...,
         min_length=9,
-        max_length=12,
-        pattern=r"^[a-zA-Z0-9]+$"
+        max_length=12
     )
+
+    @field_validator("immigration_card")
+    @classmethod
+    def validate_format(cls, v):
+        if not v.isalnum():
+            raise ValueError("El carnet solo puede contener letras y números")
+        return v
 
 class UserResponse(BaseModel):
     id: int

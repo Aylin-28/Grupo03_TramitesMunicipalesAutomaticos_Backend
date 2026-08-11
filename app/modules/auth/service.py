@@ -10,9 +10,7 @@ from app.modules.auth.schemas import (
 )
 
 from app.models.user import User
-
 from app.db.session import SessionLocal
-
 from app.integrations.reniec.client import ReniecClient
 
 from app.core.security import (
@@ -21,13 +19,13 @@ from app.core.security import (
     verify_password_hash
 )
 
+# =========================
+# UTILIDADES SEGURAS
+# =========================
 
-# =========================================
-# UTILIDADES
-# =========================================
-
-# Este funciona en los nombres del form y de RENIEC. Les da un formato para compararlos y ver si coinciden
-def clean_text(text: str):
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
 
     return (
         unicodedata.normalize("NFD", text)
@@ -38,278 +36,195 @@ def clean_text(text: str):
         .strip()
     )
 
-def validate_password(password: str):
 
-    # La contrasena debe tener minimo 8 caracteres
+def validate_name(name: str):
+    if not name:
+        raise HTTPException(status_code=400, detail="El nombre es obligatorio")
+
+    if not re.fullmatch(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ ]+", name):
+        raise HTTPException(
+            status_code=400,
+            detail="El nombre solo debe contener letras y espacios"
+        )
+
+    if len(name.strip()) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail="El nombre es demasiado corto"
+        )
+
+
+def validate_dni(dni: str):
+    if not re.fullmatch(r"\d{8}", dni):
+        raise HTTPException(
+            status_code=400,
+            detail="El DNI debe tener exactamente 8 números"
+        )
+
+
+def validate_ce(ce: str):
+    if not re.fullmatch(r"[a-zA-Z0-9]{9,12}", ce):
+        raise HTTPException(
+            status_code=400,
+            detail="Carné inválido (9 a 12 caracteres alfanuméricos)"
+        )
+
+
+def validate_password(password: str):
     if len(password) < 8:
-        raise HTTPException(
-            status_code=400,
-            detail="La contraseña debe tener mínimo 8 caracteres"
-        )
-    # La contrasena debe tener al menos una mayuscula
+        raise HTTPException(status_code=400, detail="Mínimo 8 caracteres")
+
     if not re.search(r"[A-Z]", password):
-        raise HTTPException(
-            status_code=400,
-            detail="La contraseña debe tener al menos una mayúscula"
-        )
+        raise HTTPException(status_code=400, detail="Debe tener una mayúscula")
 
     if not re.search(r"[0-9]", password):
-        raise HTTPException(
-            status_code=400,
-            detail="La contraseña debe tener al menos un número"
-        )
-
-def login_with_dni(data: LoginRequest):
-    
-    db: Session = SessionLocal()
-    
-    try:
-        # Se busca en la BD y se verifica si existe el registro
-        user = db.query(User).filter(
-            User.document_number == data.document
-        ).first()
-
-        # Si no hay usuario o la contraseña no coincide con el hash se lanza un error
-        if not user or not verify_password_hash(data.password, user.password):
-            raise HTTPException(
-                status_code=401,
-                detail="Credenciales inválidas" 
-            )
-
-        # Generación del Token solo si se valida
-        token = create_token({
-            "user_id": user.id,
-            "email": user.email 
-        })
-
-        return {
-            "access_token": token,
-            "token_type": "bearer"
-        }
-
-    except Exception:
-        raise
-    
-    finally:
-        db.close()
-
-# Cierre de sesión
+        raise HTTPException(status_code=400, detail="Debe tener un número")
 
 def logout_user():
     return {
         "status": "success",
-        "message": "Sesión cerrada exitosamente."
+        "message": "Sesión cerrada correctamente"
     }
 
 
-# Registro con dni
+# =========================
+# LOGIN
+# =========================
 
-def register_with_dni(data: DNIRegisterRequest):
-
+def login_with_dni(data: LoginRequest):
     db: Session = SessionLocal()
-
     try:
+        user = db.query(User).filter(User.document_number == data.document).first()
 
-        # Valida dni
-
-        if len(data.dni) != 8:
-            raise HTTPException(
-                status_code=400,
-                detail="El DNI debe tener 8 dígitos"
-            )
-
-        if not data.dni.isdigit():
-            raise HTTPException(
-                status_code=400,
-                detail="El DNI solo debe contener números"
-            )
-
-        # Valida contrasena
-
-        validate_password(data.password)
-
-        # Verifica que el email o el dni no existan en la bd aun.
-
-        existing_email = db.query(User).filter(
-            User.email == data.email
-        ).first()
-
-        if existing_email:
-            raise HTTPException(
-                status_code=400,
-                detail="El correo ya existe"
-            )
-
-        existing_dni = db.query(User).filter(
-            User.document_number == data.dni
-        ).first()
-
-        if existing_dni:
-            raise HTTPException(
-                status_code=400,
-                detail="El DNI ya existe"
-            )
-
-        
-        # Creamos el objeto ReniecCliet para acceder al metodo de validar dni
-        reniec = ReniecClient()
-
-        # Verificamos que el dni existe
-        reniec_data = reniec.validate_dni(
-            data.dni
-        )
-
-        if not reniec_data:
-            raise HTTPException(
-                status_code=400,
-                detail="DNI no válido"
-            )
-
-        # Verificamos que el nombre ingresado coincida con el de RENIEC
-
-        api_name = clean_text(
-            reniec_data.get("nombre_completo", "")
-        )
-
-        form_name = clean_text(
-            data.fullname
-        )
-
-        # Convertimos los nombres en listas de palabras
-
-        api_words = api_name.split()
-        form_words = form_name.split()
-
-        matches = (
-            len(api_words) == len(form_words)
-            and all(word in form_words for word in api_words)
-        )
-
-        if not matches:
-            raise HTTPException(
-                status_code=400,
-                detail="El nombre no coincide con RENIEC"
-         )
-
-        # Hasheamos la contrasena
-
-        hashed_password = hash_password(
-            data.password
-        )
-
-        # Creamos un objeto de tipo Usuario
-
-        user = User(
-            full_name=data.fullname,
-            email=data.email,
-            password=hashed_password,
-            document_type="dni",
-            document_number=data.dni
-        )
-
-        # Guardamos en la bd al usuario (el id se genera automaticamente)
-        db.add(user)
-
-        # Confirmamos nuestros cambios
-        db.commit()
-
-        # Actualiza el objeto user con los datos reales guardados en la BD.
-        db.refresh(user)
-
-        token = create_token({
-            "user_id": user.id,   # Tiene el valor del id del usuario guardado gracias a refresh
-            "email": user.email   # Tiene el valor del email del usuario guardado gracias a refresh
-        })
+        if not user or not verify_password_hash(data.password, user.password):
+            raise HTTPException(status_code=401, detail="Credenciales inválidas")
 
         return {
-            "access_token": token,
+            "access_token": create_token({
+                "user_id": user.id,
+                "email": user.email
+            }),
             "token_type": "bearer"
         }
 
-    except Exception:
-        db.rollback()
-        raise
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     finally:
         db.close()
 
-    
-# Registro con carne de extranjeria
 
-def register_with_immigrationcard(
-    data: ImmigrationCardRegisterRequest
-):
+# =========================
+# REGISTER DNI
+# =========================
 
+def register_with_dni(data: DNIRegisterRequest):
     db: Session = SessionLocal()
 
     try:
-
-        # Valida contrasena
-
+        validate_dni(data.dni)
+        validate_name(data.fullname)
         validate_password(data.password)
 
-        # Verifica que el email y el carnet no existan aun
+        if db.query(User).filter(User.email == data.email).first():
+            raise HTTPException(status_code=400, detail="Correo ya registrado")
 
-        existing_email = db.query(User).filter(
-            User.email == data.email
-        ).first()
+        if db.query(User).filter(User.document_number == data.dni).first():
+            raise HTTPException(status_code=400, detail="DNI ya registrado")
 
-        if existing_email:
-            raise HTTPException(
-                status_code=400,
-                detail="El correo ya existe"
-            )
+        reniec = ReniecClient()
+        reniec_data = reniec.validate_dni(data.dni)
 
-        existing_document = db.query(User).filter(
-            User.document_number == data.immigration_card
-        ).first()
+        if not reniec_data:
+            raise HTTPException(status_code=400, detail="DNI no válido")
 
-        if existing_document:
-            raise HTTPException(
-                status_code=400,
-                detail="El carnet ya existe"
-            )
-
-        # Hashea la contrasena
-
-        hashed_password = hash_password(
-            data.password
-        )
-
-        # Crea el usuario
+        if clean_text(reniec_data.get("nombre_completo")) != clean_text(data.fullname):
+            raise HTTPException(status_code=400, detail="Nombre no coincide con RENIEC")
 
         user = User(
             full_name=data.fullname,
             email=data.email,
-            password=hashed_password,
+            password=hash_password(data.password),
+            document_type="dni",
+            document_number=data.dni
+        )
+
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        return {
+            "access_token": create_token({
+                "user_id": user.id,
+                "email": user.email
+            }),
+            "token_type": "bearer"
+        }
+
+    except HTTPException as e:
+        db.rollback()
+        raise e
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        db.close()
+
+
+# =========================
+# REGISTER CE
+# =========================
+
+def register_with_immigrationcard(data: ImmigrationCardRegisterRequest):
+    db: Session = SessionLocal()
+
+    try:
+        validate_ce(data.immigration_card)
+        validate_name(data.fullname)
+        validate_password(data.password)
+
+        if db.query(User).filter(User.email == data.email).first():
+            raise HTTPException(status_code=400, detail="Correo ya registrado")
+
+        if db.query(User).filter(User.document_number == data.immigration_card).first():
+            raise HTTPException(status_code=400, detail="Carné ya registrado")
+
+        user = User(
+            full_name=data.fullname,
+            email=data.email,
+            password=hash_password(data.password),
             document_type="immigration_card",
             document_number=data.immigration_card
         )
 
         db.add(user)
-
         db.commit()
-
         db.refresh(user)
 
-        # Crea el token
-
-        token = create_token({
-            "user_id": user.id,
-            "email": user.email
-        })
-
         return {
-            "access_token": token,
+            "access_token": create_token({
+                "user_id": user.id,
+                "email": user.email
+            }),
             "token_type": "bearer"
         }
 
-    except Exception:
+    except HTTPException as e:
         db.rollback()
-        raise
+        raise e
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
     finally:
         db.close()
+
 
 def get_user_profile(user_id: int, db: Session):
     user = db.query(User).filter(User.id == user_id).first()
@@ -333,3 +248,5 @@ def update_user_email(user_id: int, new_email: str, db: Session):
     db.commit()
     db.refresh(user)
     return user
+
+    
